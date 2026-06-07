@@ -5,9 +5,11 @@
 *.obj
 *.a
 
-# Emscripten / wasm output
+# Emscripten / wasm output (regenerate with `make wasm`)
 /l26c.js
 /l26c.wasm
+/web/l26.js
+/web/l26.wasm
 *.wasm
 *.mem
 

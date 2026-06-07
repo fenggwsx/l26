@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L26 Compiler &mdash; Web Visualizer</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">L26</span>
+    <span class="subtitle">Compiler &amp; P-Code VM Visualizer</span>
+  </div>
+  <div class="status" id="wasm-status">loading wasm&hellip;</div>
+</header>
+
+<main class="grid">
+  <!-- LEFT: editor + controls -->
+  <section class="panel editor-panel">
+    <div class="panel-head">
+      <h2>Source</h2>
+      <div class="head-controls">
+        <label for="example-select" class="sr-only">Load example</label>
+        <select id="example-select" title="Load an example program"></select>
+      </div>
+    </div>
+    <textarea id="source" spellcheck="false" autocomplete="off"></textarea>
+    <div class="toolbar">
+      <button id="btn-compile" class="btn primary">Compile</button>
+      <button id="btn-reset"   class="btn"          disabled>Reset</button>
+      <button id="btn-step"    class="btn"          disabled>Step</button>
+      <button id="btn-run"     class="btn"          disabled>Run</button>
+      <span class="run-state" id="run-state"></span>
+    </div>
+
+    <div class="panel-head sub">
+      <h3>Diagnostics</h3>
+    </div>
+    <div id="diagnostics" class="diagnostics">
+      <span class="muted">Compile to see diagnostics.</span>
+    </div>
+
+    <div class="panel-head sub">
+      <h3>Output Console</h3>
+      <button id="btn-clear-output" class="btn tiny" title="Clear console">clear</button>
+    </div>
+    <pre id="output" class="console"></pre>
+  </section>
+
+  <!-- RIGHT: pcode + memory + stack -->
+  <section class="panel right-panel">
+    <div class="rgrid">
+      <div class="subpanel pcode-wrap">
+        <div class="panel-head sub">
+          <h3>P-Code</h3>
+          <span class="muted" id="frame-info"></span>
+        </div>
+        <div class="pcode-scroll">
+          <table id="pcode" class="pcode">
+            <thead>
+              <tr><th>#</th><th>op</th><th>L</th><th>A</th><th>disassembly</th></tr>
+            </thead>
+            <tbody><tr><td colspan="5" class="muted">No program compiled.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="subpanel mem-wrap">
+        <div class="panel-head sub">
+          <h3>Memory &mdash; Activation Record</h3>
+          <span class="muted" id="pc-badge"></span>
+        </div>
+        <div id="memory" class="memory">
+          <span class="muted">Compile and step to view memory.</span>
+        </div>
+
+        <div class="panel-head sub">
+          <h3>Operand Stack <span class="muted">(top highlighted)</span></h3>
+        </div>
+        <div id="stack" class="stack">
+          <span class="muted">empty</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- input prompt modal for read / SREAD -->
+<div id="input-overlay" class="overlay hidden">
+  <div class="modal">
+    <h3 id="input-title">Program requests input</h3>
+    <p class="muted" id="input-hint">Enter a value for <code>read</code>. For a set read, give space/comma separated integers.</p>
+    <input type="text" id="input-line" autocomplete="off" placeholder="e.g. 2   or   1 2 3" />
+    <div class="modal-actions">
+      <button id="input-cancel" class="btn">Cancel</button>
+      <button id="input-feed" class="btn primary">Feed &amp; Continue</button>
+    </div>
+  </div>
+</div>
+
+<script src="l26.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

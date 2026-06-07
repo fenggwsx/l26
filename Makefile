@@ -38,20 +38,43 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
 clean:
-	rm -rf $(OBJDIR) $(BIN) l26c.js l26c.wasm
+	rm -rf $(OBJDIR) $(BIN) l26c.js l26c.wasm web/l26.js web/l26.wasm
 
 # --- wasm (Emscripten) build: guarded so plain `make` never needs emcc ---
-# The core is pure C and links unchanged under emcc; main.c serves as the
-# entry. EXPORTED functions for the JS visualizer shell are added in the web
-# phase. If emcc is not installed, print a friendly note instead of failing.
+# Compiles every core .c PLUS the wasm shell (src/wasm_api.c) but EXCLUDES the
+# native CLI entry (src/main.c) - the wasm shell provides its own exported entry
+# points. Output goes into web/ as l26.js + l26.wasm. The compiler core is
+# NEVER compiled to wasm in the sense of L26 programs; what becomes wasm is the
+# C TOOLCHAIN itself (decision #4), driven from the browser via these exports.
+#
+# Build command (emcc is not on PATH in this environment):
+#   export PATH="/usr/lib/emscripten:$PATH"; make wasm
+#
+# If emcc is not found, print a friendly note instead of failing so plain
+# `make` (native) is never affected.
 EMCC := $(shell command -v emcc 2>/dev/null)
+
+# Core sources for wasm = all sources except the native CLI entry, plus the
+# wasm shell. (wasm_api.c is already in $(SRCS); we only need to drop main.c.)
+WASM_SRCS := $(filter-out $(SRCDIR)/main.c,$(SRCS))
+
+WASM_OUT  := web/l26.js
+
+# Exported C functions (KEEPALIVE), each prefixed with '_' for the linker.
+WASM_EXPORTS := _l26_compile,_l26_step,_l26_reset,_l26_run,\
+_l26_feed_input,_l26_clear_input,_l26_frame_size,_malloc,_free
+
+WASM_FLAGS := -s MODULARIZE=1 -s EXPORT_ES6=0 -s EXPORT_NAME=L26 \
+	-s 'EXPORTED_RUNTIME_METHODS=["ccall","cwrap","UTF8ToString","stringToUTF8","lengthBytesUTF8"]' \
+	-s EXPORTED_FUNCTIONS='[$(WASM_EXPORTS)]' \
+	-s ALLOW_MEMORY_GROWTH=1
+
 wasm:
 ifeq ($(EMCC),)
 	@echo "wasm: emcc (Emscripten) not found in PATH; skipping."
-	@echo "      Install Emscripten and re-run 'make wasm' to build l26c.js/.wasm."
+	@echo "      Run: export PATH=\"/usr/lib/emscripten:\$$PATH\"; make wasm"
 else
-	$(EMCC) $(CSTD) $(WARN) -O2 -Iinclude $(SRCS) -o l26c.js \
-	    -s MODULARIZE=1 -s EXPORT_NAME=L26 \
-	    -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap"]'
-	@echo "wasm: built l26c.js + l26c.wasm"
+	@mkdir -p web
+	$(EMCC) $(CSTD) $(WARN) -O2 -Iinclude $(WASM_SRCS) -o $(WASM_OUT) $(WASM_FLAGS)
+	@echo "wasm: built web/l26.js + web/l26.wasm"
 endif
