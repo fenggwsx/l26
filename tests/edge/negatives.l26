@@ -1,0 +1,22 @@
+{
+    // Negative numbers. L26 has no unary-minus literal; negatives are
+    // produced by subtraction (e.g. 0 - n). Tests negatives in
+    // arithmetic, comparisons, and as sorted set elements.
+    int x;
+    set s;
+    x = 0 - 5;
+    write x;                                 // -5
+    x = x * 2;
+    write x;                                 // -10
+    x = x + 3;
+    write x;                                 // -7
+    if (x < 0) { write 1; } else { write 0; } // 1
+    if ((0 - 3) < (0 - 1)) { write 1; } else { write 0; } // 1
+
+    s = {};
+    add s 0 - 3;
+    add s 0 - 1;
+    add s 2;
+    add s 0 - 10;
+    write s;                                 // {-10,-3,-1,2} sorted ascending
+}

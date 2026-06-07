@@ -1,0 +1,28 @@
+{
+    // Boolean logic truth demo.
+    // NOTE on the grammar: a bare boolean variable is NOT a valid boolean
+    // factor (the grammar has no  bfactor -> ID  production), so boolean
+    // atoms here are relations like (a>0). Bare bool vars are only used as
+    // assignment targets and as "write" operands. This program prints a
+    // deterministic sequence of 0/1 truth values, one per line.
+    int a;
+    int b;
+    bool p;
+    bool q;
+    a = 1;
+    b = 0;
+    p = a > 0;   // true,  stored
+    q = b > 0;   // false, stored
+    write p;                          // 1
+    write q;                          // 0
+    write (a > 0) && (b > 0);         // AND: 0
+    write (a > 0) || (b > 0);         // OR:  1
+    write !(a > 0);                   // NOT: 0
+    write !(b > 0);                   // NOT: 1
+    write (a > 0) && !(b > 0);        // 1
+    write ((a > 0) || (b > 0)) && !((a > 0) && (b > 0)); // XOR: 1
+    // De Morgan: !(A && B) and (!A || !B) are both 1 here
+    write !((a > 0) && (b > 0));      // 1
+    write !(a > 0) || !(b > 0);       // 1
+    write (a >= 1) && (b <= 0) && !(a < b); // 1
+}

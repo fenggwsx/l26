@@ -1,0 +1,23 @@
+{
+    // Shadowing across scopes, including a set shadowing an int (as in
+    // AGENTS.md example 2) and restoration of the outer binding when the
+    // inner block ends. Also reaches an outer variable from inner scope.
+    int x;
+    set s;
+    x = 10;
+    s = {1, 2};
+    {
+        set x;          // shadows outer int x with a set x
+        x = {5, 6};
+        add x 7;
+        write x;        // {5,6,7}
+        write s;        // outer s reached from inner: {1,2}
+        {
+            int x;      // shadows the set x with an int x
+            x = 99;
+            write x;    // 99
+        }
+        write x;        // back to set x: {5,6,7}
+    }
+    write x;            // outer int x restored: 10
+}

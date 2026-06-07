@@ -1,0 +1,5 @@
+{
+    int x;
+    x = 1;
+    add x 5;        // error: 'add' requires a set variable
+}

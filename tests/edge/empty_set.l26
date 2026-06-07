@@ -1,0 +1,21 @@
+{
+    // Empty-set operations: clear, isempty, union/inter with empty,
+    // remove from empty, add then check.
+    set e;
+    set a;
+    set u;
+    set i;
+    e = {};
+    a = {1, 2, 3};
+    if (isempty(e)) { write 1; } else { write 0; }   // 1
+    remove e 5;                                        // no-op on empty
+    if (isempty(e)) { write 1; } else { write 0; }   // 1
+    u = e union a;                                     // {1,2,3}
+    write u;
+    i = e inter a;                                     // {}
+    write i;
+    if (isempty(i)) { write 1; } else { write 0; }   // 1
+    add e 42;
+    if (isempty(e)) { write 1; } else { write 0; }   // 0
+    write e;                                            // {42}
+}

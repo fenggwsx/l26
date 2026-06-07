@@ -1,0 +1,5 @@
+{
+    set s;
+    s = 5;          // error: assigning int to a set variable
+    write s;
+}

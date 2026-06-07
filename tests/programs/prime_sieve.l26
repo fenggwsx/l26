@@ -1,0 +1,27 @@
+{
+    // Sieve of Eratosthenes over 2..30 using a set of composites.
+    // Build the set of composite numbers, then print every n that is
+    // NOT composite (i.e. prime). Demonstrates nested loops, set add,
+    // and "in" membership testing.
+    set composite;
+    int i;
+    int j;
+    composite = {};
+    i = 2;
+    while (i * i <= 30) {
+        j = i + i;
+        while (j <= 30) {
+            add composite j;
+            j = j + i;
+        }
+        i = i + 1;
+    }
+    // Print primes 2..30.
+    i = 2;
+    while (i <= 30) {
+        if (!(i in composite)) {
+            write i;
+        }
+        i = i + 1;
+    }
+}

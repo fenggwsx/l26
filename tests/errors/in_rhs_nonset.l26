@@ -1,0 +1,9 @@
+{
+    int x;
+    int y;
+    x = 1;
+    y = 2;
+    if (x in y) {   // error: 'in' right side must be a set
+        write 1;
+    }
+}

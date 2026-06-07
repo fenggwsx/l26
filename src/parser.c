@@ -171,8 +171,12 @@ static const Production GRAMMAR[] = {
 /* 2. FIRST sets                                                       */
 /* ================================================================== */
 
-static unsigned char g_first[SYM_COUNT][SYM_COUNT]; /* first[nt][term] (terms only) */
-static unsigned char g_nullable[SYM_COUNT];
+/* Sized SYM_COUNT+1 on the row axis so the augmented start symbol NT__END
+ * (used as the LHS of the synthetic S' -> program production) has a valid
+ * slot. The column axis only ever indexes terminals (< NT_BASE), so SYM_COUNT
+ * columns suffice. */
+static unsigned char g_first[SYM_COUNT + 1][SYM_COUNT]; /* first[nt][term] (terms only) */
+static unsigned char g_nullable[SYM_COUNT + 1];
 
 static void compute_first(void) {
     memset(g_first, 0, sizeof(g_first));

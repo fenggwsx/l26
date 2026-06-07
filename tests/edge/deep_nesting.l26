@@ -1,0 +1,31 @@
+{
+    // Deep block nesting with arithmetic accumulation across levels.
+    int total;
+    total = 0;
+    {
+        int a;
+        a = 1;
+        total = total + a;          // 1
+        {
+            int b;
+            b = 2;
+            total = total + b;      // 3
+            {
+                int c;
+                c = 3;
+                total = total + c;  // 6
+                {
+                    int d;
+                    d = 4;
+                    total = total + d;  // 10
+                    {
+                        int e;
+                        e = 5;
+                        total = total + e;  // 15
+                    }
+                }
+            }
+        }
+    }
+    write total;    // 15
+}

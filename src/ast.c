@@ -225,6 +225,7 @@ Node *ast_setcomp(SrcPos pos, Node *gen, const char *var,
     n->as.comp.filter = filter;
     n->as.comp.src_sym = -1;
     n->as.comp.compvar_sym = -1;
+    n->as.comp.temp_sym = -1;
     n->vtype = TYPE_SET;
     return n;
 }

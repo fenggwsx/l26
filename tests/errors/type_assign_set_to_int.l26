@@ -1,0 +1,7 @@
+{
+    int x;
+    set s;
+    s = {1, 2, 3};
+    x = s;          // type error: assigning a set to an int variable
+    write x;
+}

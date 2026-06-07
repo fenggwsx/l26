@@ -1,0 +1,5 @@
+{
+    int x;
+    x = y;          // error: y is undeclared
+    write x;
+}

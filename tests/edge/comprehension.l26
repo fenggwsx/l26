@@ -1,0 +1,29 @@
+{
+    // Set comprehension edge cases: over an empty source, over a source
+    // where the filter rejects everything, identity comprehension, and
+    // a comprehension whose generator maps distinct inputs to the same
+    // output (results get deduplicated).
+    set src;
+    set empty;
+    set r;
+
+    empty = {};
+    src = {1, 2, 3, 4, 5};
+
+    r = { x + 1 | x in empty if x > 0 };   // empty source -> {}
+    write r;
+
+    r = { x | x in src if x > 100 };        // all filtered out -> {}
+    write r;
+
+    r = { x | x in src };                   // identity -> {1,2,3,4,5}
+    write r;
+
+    r = { x + 10 | x in src if x > 2 };     // {13,14,15}
+    write r;
+
+    // Generator collisions: x/2 over {2,3,4,5} -> {1,1,2,2} dedup -> {1,2}
+    src = {2, 3, 4, 5};
+    r = { x / 2 | x in src };
+    write r;
+}

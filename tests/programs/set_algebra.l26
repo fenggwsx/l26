@@ -1,0 +1,39 @@
+{
+    // Set algebra demo: build two sets, then show union, intersection,
+    // a comprehension (double each even element), and set equality.
+    // Fully deterministic, no input.
+    set a;
+    set b;
+    set u;
+    set i;
+    set doubled;
+    set expect;
+
+    a = {1, 2, 3, 4, 5};
+    b = {4, 5, 6, 7, 8};
+
+    u = a union b;          // {1,2,3,4,5,6,7,8}
+    write u;
+
+    i = a inter b;          // {4,5}
+    write i;
+
+    // Comprehension: from a, keep elements > 2, emit 2*x  -> {6,8,10}
+    doubled = { x + x | x in a if x > 2 };
+    write doubled;
+
+    // Set equality bonus: confirm intersection equals the literal {4,5}.
+    expect = {4, 5};
+    if (i == expect) {
+        write 1;
+    } else {
+        write 0;
+    }
+
+    // Membership + isempty combined into a boolean.
+    if ((6 in u) && !isempty(i)) {
+        write 1;
+    } else {
+        write 0;
+    }
+}

@@ -1,0 +1,14 @@
+{
+    // Factorial: read n, write n! computed iteratively.
+    int n;
+    int fact;
+    int k;
+    read n;
+    fact = 1;
+    k = 1;
+    while (k <= n) {
+        fact = fact * k;
+        k = k + 1;
+    }
+    write fact;
+}

@@ -126,12 +126,34 @@ static ValueType check_setbin(Node *n, SymTab *st, DiagList *dl) {
     return TYPE_SET;
 }
 
-/* set == set / set != set (BONUS): both names must be sets; yields bool.
- * Encoded as N_SETEQ with as.binop where lhs/rhs are N_VAR nodes. */
+/* ID == ID / ID != ID: the parser folds any bare "var ==/!= var" into N_SETEQ
+ * (it cannot tell scalars from sets at parse time). Here we make the final
+ * determination by operand type:
+ *   - both operands set  -> genuine set (in)equality, yields bool (BONUS);
+ *   - both operands scalar (int/bool) -> rewrite to a relational comparison
+ *     (N_REL) so codegen lowers it via OPR_EQ/OPR_NE;
+ *   - any other mix      -> type error.
+ * Encoded as as.binop with lhs/rhs N_VAR nodes (op = EQ/NE). */
 static ValueType check_seteq(Node *n, SymTab *st, DiagList *dl) {
     ValueType lt = check_expr(n->as.binop.lhs, st, dl);
     ValueType rt = check_expr(n->as.binop.rhs, st, dl);
     if (lt == TYPE_ERROR || rt == TYPE_ERROR) return TYPE_ERROR;
+
+    /* Scalar comparison: rewrite N_SETEQ -> N_REL (shares as.binop layout). */
+    int l_scalar = (lt == TYPE_INT || lt == TYPE_BOOL);
+    int r_scalar = (rt == TYPE_INT || rt == TYPE_BOOL);
+    if (l_scalar && r_scalar) {
+        if (lt != rt) {
+            SEM_ERR(dl, n->pos,
+                    "'%s' requires operands of the same type (got %s and %s)",
+                    (n->as.binop.op == OP_EQ) ? "==" : "!=",
+                    value_type_name(lt), value_type_name(rt));
+            return TYPE_ERROR;
+        }
+        n->kind = N_REL;
+        return TYPE_BOOL;
+    }
+
     if (lt != TYPE_SET || rt != TYPE_SET) {
         SEM_ERR(dl, n->pos,
                 "set %s requires set operands (got %s and %s)",
@@ -200,6 +222,14 @@ static ValueType check_comp(Node *n, SymTab *st, DiagList *dl) {
     symtab_enter_scope(st);
     n->as.comp.compvar_sym =
         symtab_declare(st, n->as.comp.var, TYPE_INT, n->pos, dl);
+
+    /* Also reserve a hidden scratch SET slot. codegen builds the result here
+     * and copies it into the destination at the end, so a self-assigning
+     * comprehension (s = { e | x in s ... }) does not read src while mutating
+     * it. The synthetic name contains a space so it can never collide with a
+     * user identifier. */
+    n->as.comp.temp_sym =
+        symtab_declare(st, "comp tmp", TYPE_SET, n->pos, dl);
 
     int body_ok = 1;
     ValueType gt = check_expr(n->as.comp.gen, st, dl);

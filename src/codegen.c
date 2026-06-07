@@ -8,11 +8,10 @@
  * offset; set-valued expressions are materialised directly into a destination
  * region rather than pushed onto the operand stack (see gen_set_into).
  *
- * Boolean operators use SIMPLE (non-short-circuit) evaluation: both operands
- * are fully evaluated, then combined arithmetically.  L26 has no side effects
- * in expressions (no function calls, no assignment-expressions), so this is
- * observationally identical to short-circuit evaluation while keeping codegen
- * small.  Documented here and in DESIGN.md.
+ * Boolean operators && / || use SHORT-CIRCUIT evaluation: the right operand is
+ * skipped (via JPC/JMP) once the left operand determines the result.  This
+ * keeps guard idioms such as `x != 0 && 10 / x > 0` safe from runtime traps
+ * (e.g. division by zero) in the logically-skipped operand.
  *
  * Pure C99, no I/O.  Diagnostics (rare after semantic analysis) go to dl.
  */
@@ -129,20 +128,33 @@ static void gen_expr(Ctx *c, const Node *n) {
             break;
 
         case N_LOGIC:
-            /* Simple (non-short-circuit) evaluation. Operands are 0/1 bools.
-             *   AND : (a + b) == 2     ->  a*b without a MUL opcode confusion
-             *   OR  : (a + b) >  0
-             * Using add+compare keeps results normalised to 0/1 regardless of
-             * any non-canonical bool inputs. */
-            gen_expr(c, n->as.binop.lhs);
-            gen_expr(c, n->as.binop.rhs);
-            emit(c, OP_OPR, 0, OPR_ADD);
+            /* Short-circuit evaluation of && / ||. The right operand is NOT
+             * evaluated when the left already determines the result, so a guard
+             * idiom like `x != 0 && 10 / x > 0` never executes the division
+             * when x == 0. Operands are 0/1 bools; the result is normalised to
+             * 0/1. JPC pops its test value, so each path leaves exactly one
+             * value on the stack. */
             if (n->as.binop.op == OP_AND) {
-                emit(c, OP_LIT, 0, 2);
-                emit(c, OP_OPR, 0, OPR_EQ);   /* (a+b)==2 */
-            } else { /* OP_OR */
+                /* a && b : if a==0 -> 0 ; else (b>0) */
+                gen_expr(c, n->as.binop.lhs);
+                int jfalse = emit(c, OP_JPC, 0, 0);   /* a==0 -> false      */
+                gen_expr(c, n->as.binop.rhs);
                 emit(c, OP_LIT, 0, 0);
-                emit(c, OP_OPR, 0, OPR_GT);   /* (a+b)>0  */
+                emit(c, OP_OPR, 0, OPR_GT);           /* (b>0) -> 0/1       */
+                int jend = emit(c, OP_JMP, 0, 0);
+                patch(c, jfalse, here(c));
+                emit(c, OP_LIT, 0, 0);                /* false branch -> 0  */
+                patch(c, jend, here(c));
+            } else { /* OP_OR : if a!=0 -> 1 ; else (b>0) */
+                gen_expr(c, n->as.binop.lhs);
+                int jcheck = emit(c, OP_JPC, 0, 0);   /* a==0 -> check b    */
+                emit(c, OP_LIT, 0, 1);                /* a true -> 1        */
+                int jend = emit(c, OP_JMP, 0, 0);
+                patch(c, jcheck, here(c));
+                gen_expr(c, n->as.binop.rhs);
+                emit(c, OP_LIT, 0, 0);
+                emit(c, OP_OPR, 0, OPR_GT);           /* (b>0) -> 0/1       */
+                patch(c, jend, here(c));
             }
             break;
 
@@ -230,14 +242,18 @@ static void gen_set_into(Ctx *c, int dest, const Node *n) {
              *     x       = cell[src+k]            (LOD srcoff+k ; STO xoff)
              *     if (filter) { gen -> SADD dest }
              * Out-of-range slots jump straight to `end`.  This reads src
-             * without mutating it; dest is always a distinct target set var.
+             * without mutating it.  The result is built into a private scratch
+             * set (comp.temp_sym) and copied into `dest` only at the end, so a
+             * self-assigning comprehension (s = { e | x in s ... }) does not
+             * clear or mutate src while the loop is still reading it.
              *
              * x (compvar_sym) is the comprehension variable's private scalar
              * cell, visible only inside gen/filter (semantic.c scoped it). */
             int xoff   = sym_offset(c, n->as.comp.compvar_sym);
             int srcoff = sym_offset(c, n->as.comp.src_sym);
+            int tmpoff = sym_offset(c, n->as.comp.temp_sym);
 
-            emit(c, OP_SCLR, 0, dest);             /* dest := {}            */
+            emit(c, OP_SCLR, 0, tmpoff);           /* tmp := {}             */
 
             int end_jumps[L26_MAX_SET];
             int nend = 0;
@@ -261,15 +277,17 @@ static void gen_set_into(Ctx *c, int dest, const Node *n) {
                 }
 
                 gen_expr(c, n->as.comp.gen);       /* value of gen expr     */
-                emit(c, OP_SADD, 0, dest);
+                emit(c, OP_SADD, 0, tmpoff);
 
                 if (skip >= 0) patch(c, skip, here(c));
             }
-            /* end: */
+            /* end: copy the scratch result into dest (safe even if dest==src). */
             {
                 int endpc = here(c);
                 for (int i = 0; i < nend; ++i) patch(c, end_jumps[i], endpc);
             }
+            emit(c, OP_LIT, 0, tmpoff);
+            emit(c, OP_SCOPY, 0, dest);
             break;
         }
 

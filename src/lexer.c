@@ -160,7 +160,8 @@ static int sc_advance(Scanner *s) {
 }
 
 /* Append a token to the stream if there is room. Returns 1 on success,
- * 0 if the stream is full (leaving the trailing EOF slot reserved). */
+ * 0 if the stream is full (leaving the trailing EOF slot reserved). The
+ * caller is responsible for surfacing the overflow as a diagnostic. */
 static int emit(TokenStream *out, TokenKind kind, SrcPos pos,
                 const char *text, int textlen, long ival) {
     Token *t;
@@ -204,6 +205,17 @@ int lexer_scan(const char *src, TokenStream *out, DiagList *dl) {
             break;
         }
 
+        /* Token-stream capacity reached. The next real token would be dropped,
+         * which the parser would otherwise misreport as a premature end of
+         * input. Report the true cause once and stop scanning. */
+        if (out->count >= L26_MAX_TOKENS - 1 && !is_space_ch(c) &&
+            !(c == '/' && sc_peek2(&s) == '/')) {
+            diag_add(dl, DIAG_ERROR, DIAG_PHASE_LEX, sc_here(&s),
+                     "program too large: exceeds the %d-token limit",
+                     L26_MAX_TOKENS - 1);
+            break;
+        }
+
         /* Whitespace. */
         if (is_space_ch(c)) {
             sc_advance(&s);
@@ -232,6 +244,12 @@ int lexer_scan(const char *src, TokenStream *out, DiagList *dl) {
             {
                 int n = len;
                 if (n > L26_MAX_IDENT - 1) {
+                    /* Truncating distinct long names would let them collide
+                     * silently (spurious redeclaration / misresolution), so
+                     * report rather than truncate in silence. */
+                    diag_add(dl, DIAG_ERROR, DIAG_PHASE_LEX, start,
+                             "identifier too long (%d chars); limit is %d",
+                             len, L26_MAX_IDENT - 1);
                     n = L26_MAX_IDENT - 1;
                 }
                 memcpy(buf, s.src + begin, (size_t)n);
@@ -253,7 +271,11 @@ int lexer_scan(const char *src, TokenStream *out, DiagList *dl) {
             while (is_digit_ch(sc_peek(&s))) {
                 int d = sc_advance(&s) - '0';
                 if (!overflow) {
-                    if (val > (LONG_MAX - d) / 10) {
+                    /* The VM stores int values in 32-bit `int` cells, so the
+                     * meaningful ceiling is INT_MAX, not LONG_MAX. A literal
+                     * that exceeds INT_MAX cannot round-trip through the int
+                     * stack and would silently truncate, so flag it here. */
+                    if (val > (INT_MAX - d) / 10) {
                         overflow = 1;
                     } else {
                         val = val * 10 + d;
@@ -271,9 +293,9 @@ int lexer_scan(const char *src, TokenStream *out, DiagList *dl) {
             }
             if (overflow) {
                 diag_add(dl, DIAG_WARNING, DIAG_PHASE_LEX, start,
-                         "integer literal '%s' overflows; clamped to %ld",
-                         buf, LONG_MAX);
-                val = LONG_MAX;
+                         "integer literal '%s' overflows int; clamped to %d",
+                         buf, INT_MAX);
+                val = INT_MAX;
             }
             emit(out, TOK_NUM, start, buf, len, val);
             continue;

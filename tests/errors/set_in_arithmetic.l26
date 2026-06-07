@@ -1,0 +1,6 @@
+{
+    int x;
+    set s;
+    s = {1};
+    x = s + 1;      // error: set used in arithmetic
+}

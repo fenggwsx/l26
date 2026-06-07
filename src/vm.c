@@ -24,14 +24,118 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- default stdio I/O hooks ---- */
+/* ---- default stdio I/O hooks ----
+ *
+ * Input is line-buffered so `read` (one int) and `read` of a set (a whole
+ * line of ints) compose without stealing each other's input:
+ *   - a scalar read consumes the next whitespace/comma-separated integer,
+ *     pulling in a fresh line only when the current one is exhausted;
+ *   - a set read (io_read_set_default) consumes the REST of the current line
+ *     (refilling first if the current line is already exhausted), so it never
+ *     reaches across a newline into input meant for a later read.
+ * Keeping both on the same buffered cursor avoids the classic scanf/fgets
+ * mixing hazard. */
+typedef struct {
+    char line[4096];
+    int  pos;     /* cursor into line[] */
+    int  len;     /* bytes valid in line[] */
+    int  eof;     /* set once stdin is exhausted */
+    int  primed;  /* whether line[] holds a line not yet fully consumed */
+} StdinState;
+
+static StdinState g_stdin = { {0}, 0, 0, 0, 0 };
+
+/* Refill line[] with the next line of stdin. Returns 1 on success, 0 at EOF. */
+static int stdin_fill_line(StdinState *s) {
+    if (s->eof) return 0;
+    if (fgets(s->line, (int)sizeof s->line, stdin) == NULL) {
+        s->eof = 1;
+        s->primed = 0;
+        s->len = 0;
+        s->pos = 0;
+        return 0;
+    }
+    s->len = (int)strlen(s->line);
+    s->pos = 0;
+    s->primed = 1;
+    return 1;
+}
+
+/* Parse the next integer from the current line (refilling lines as needed).
+ * Returns 1 and writes *out on success, 0 at end of input. */
+static int stdin_next_int(StdinState *s, long *out) {
+    for (;;) {
+        if (!s->primed && stdin_fill_line(s) == 0) return 0;
+        /* skip separators (whitespace and commas) */
+        while (s->pos < s->len) {
+            char ch = s->line[s->pos];
+            if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' ||
+                ch == ',') {
+                s->pos++;
+            } else {
+                break;
+            }
+        }
+        if (s->pos >= s->len) { s->primed = 0; continue; } /* line drained */
+        {
+            char *end = NULL;
+            long v = strtol(s->line + s->pos, &end, 10);
+            if (end == s->line + s->pos) {
+                /* not a number: skip one char and retry */
+                s->pos++;
+                continue;
+            }
+            s->pos = (int)(end - s->line);
+            *out = v;
+            return 1;
+        }
+    }
+}
+
 static long io_read_int_default(void *ud, int *ok) {
     (void)ud;
     long v = 0;
-    int r = scanf("%ld", &v);
-    *ok = (r == 1);
+    *ok = stdin_next_int(&g_stdin, &v);
     return v;
 }
+
+/* Read the REST of the current input line as a set's worth of ints.
+ * Writes up to `max` values into `vals`, returns the count (>=0). */
+static int io_read_set_default(void *ud, int *vals, int max) {
+    (void)ud;
+    StdinState *s = &g_stdin;
+    int n = 0;
+    /* If the current line is already drained (or none loaded yet), advance to
+     * the next line so a set read always consumes exactly one fresh line. */
+    if (!s->primed) {
+        if (stdin_fill_line(s) == 0) return 0;
+    }
+    for (;;) {
+        long v;
+        /* Stop at end of the current line, never crossing into the next. */
+        while (s->pos < s->len) {
+            char ch = s->line[s->pos];
+            if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' ||
+                ch == ',') {
+                s->pos++;
+            } else {
+                break;
+            }
+        }
+        if (s->pos >= s->len) break;
+        {
+            char *end = NULL;
+            v = strtol(s->line + s->pos, &end, 10);
+            if (end == s->line + s->pos) { s->pos++; continue; }
+            s->pos = (int)(end - s->line);
+        }
+        if (n < max) vals[n] = (int)v;
+        n++;
+    }
+    s->primed = 0; /* this line is now fully consumed */
+    return n;
+}
+
 static void io_write_str_default(void *ud, const char *s) {
     (void)ud;
     fputs(s, stdout);
@@ -391,11 +495,23 @@ static int do_set_op(VmState *vm, const VmIO *io, DiagList *dl,
             /* read one line of space/comma separated ints into set@A */
             if (set_base_ok(vm, dl, ins.a) < 0) return -1;
             st[ins.a] = 0; /* cleared first */
-            int ok = 0;
-            long v = io->read_int(io->ud, &ok);
-            while (ok) {
-                if (set_add(vm, dl, ins.a, (int)v) < 0) return -1;
-                v = io->read_int(io->ud, &ok);
+            if (io->read_int == io_read_int_default) {
+                /* Default stdio path: consume exactly one input line so a set
+                 * read does not steal integers intended for a later read. */
+                int vals[L26_MAX_SET];
+                int n = io_read_set_default(io->ud, vals, L26_MAX_SET);
+                for (int k = 0; k < n; ++k) {
+                    if (set_add(vm, dl, ins.a, vals[k]) < 0) return -1;
+                }
+            } else {
+                /* Custom IO exposes only read_int (no line boundary); read
+                 * until it stops. */
+                int ok = 0;
+                long v = io->read_int(io->ud, &ok);
+                while (ok) {
+                    if (set_add(vm, dl, ins.a, (int)v) < 0) return -1;
+                    v = io->read_int(io->ud, &ok);
+                }
             }
             return 0;
         }

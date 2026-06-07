@@ -1,0 +1,18 @@
+{
+    // GCD via the Euclidean algorithm using repeated subtraction.
+    // Reads two positive integers a and b, writes gcd(a, b).
+    // Note: avoids bare "ID == ID" / "ID != ID" (those parse as set comparison);
+    // uses ordering relations instead.
+    int a;
+    int b;
+    read a;
+    read b;
+    while (a > b || a < b) {
+        if (a > b) {
+            a = a - b;
+        } else {
+            b = b - a;
+        }
+    }
+    write a;
+}

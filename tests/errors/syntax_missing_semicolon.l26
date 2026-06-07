@@ -1,0 +1,4 @@
+{
+    int x
+    x = 1;          // error: missing semicolon after declaration
+}

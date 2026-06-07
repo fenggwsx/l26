@@ -1,0 +1,3 @@
+{
+    add t 5;        // error: t is undeclared
+}

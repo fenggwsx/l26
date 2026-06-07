@@ -97,9 +97,12 @@ struct Node {
         struct { char name[L26_MAX_IDENT]; int sym; Node *elem; } intest; /* in / isempty */
         /* Set comprehension: { gen | var in src if filter }
          * var is scoped to the comprehension; semantic.c assigns it a
-         * temporary symbol slot (compvar_sym). filter may be NULL. */
+         * temporary symbol slot (compvar_sym). filter may be NULL.
+         * temp_sym is a hidden scratch SET slot (also assigned by semantic.c)
+         * used by codegen so the result can be built without aliasing src when
+         * the comprehension is self-assigned (s = { e | x in s ... }). */
         struct { char var[L26_MAX_IDENT]; char src[L26_MAX_IDENT];
-                 int src_sym; int compvar_sym;
+                 int src_sym; int compvar_sym; int temp_sym;
                  Node *gen; Node *filter; } comp;
     } as;
 };

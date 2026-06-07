@@ -1,0 +1,13 @@
+{
+    // Integer division and multiplication, including truncation toward
+    // zero behavior and operator precedence.
+    int r;
+    r = 7 / 2;          write r;   // 3 (truncated)
+    r = 1 / 2;          write r;   // 0
+    r = 100 / 10 / 2;   write r;   // 5 (left assoc: (100/10)/2)
+    r = 2 + 3 * 4;      write r;   // 14 (precedence)
+    r = (2 + 3) * 4;    write r;   // 20
+    r = 20 - 4 - 3;     write r;   // 13 (left assoc)
+    r = 6 * 7 / 3;      write r;   // 14
+    r = 17 / 5;         write r;   // 3
+}

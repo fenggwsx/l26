@@ -1,0 +1,20 @@
+{
+    // Fill a set up to exactly 200 elements (the maximum), verify
+    // membership at the boundaries, then confirm adding a duplicate
+    // does not change it. Tests the 201-cell set layout near capacity.
+    set s;
+    int i;
+    s = {};
+    i = 1;
+    while (i <= 200) {
+        add s i;
+        i = i + 1;
+    }
+    if (1 in s) { write 1; } else { write 0; }      // 1
+    if (200 in s) { write 1; } else { write 0; }    // 1
+    if (201 in s) { write 1; } else { write 0; }    // 0 (never added)
+    add s 100;                                       // duplicate, no-op
+    if (100 in s) { write 1; } else { write 0; }    // 1
+    remove s 1;
+    if (1 in s) { write 1; } else { write 0; }      // 0
+}

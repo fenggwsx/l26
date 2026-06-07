@@ -1,0 +1,16 @@
+{
+    // Remove edge cases: remove absent element (no-op), remove every
+    // element down to empty, remove from a singleton, remove again.
+    set s;
+    s = {2, 4, 6};
+    remove s 5;     // absent -> unchanged
+    write s;        // {2,4,6}
+    remove s 4;     // middle
+    write s;        // {2,6}
+    remove s 2;     // first
+    write s;        // {6}
+    remove s 6;     // last -> empty
+    write s;        // {}
+    remove s 6;     // absent on empty -> unchanged
+    if (isempty(s)) { write 1; } else { write 0; }  // 1
+}

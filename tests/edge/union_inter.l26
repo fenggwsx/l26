@@ -1,0 +1,24 @@
+{
+    // Union and intersection of overlapping and disjoint sets, and
+    // self-union / self-intersection identities.
+    set a;
+    set b;
+    set c;
+    set r;
+    a = {1, 2, 3, 4};
+    b = {3, 4, 5, 6};   // overlaps a on {3,4}
+    c = {7, 8, 9};      // disjoint from a
+
+    r = a union b;      // {1,2,3,4,5,6}
+    write r;
+    r = a inter b;      // {3,4}
+    write r;
+    r = a union c;      // {1,2,3,4,7,8,9}
+    write r;
+    r = a inter c;      // {}
+    write r;
+    r = a union a;      // {1,2,3,4}
+    write r;
+    r = a inter a;      // {1,2,3,4}
+    write r;
+}

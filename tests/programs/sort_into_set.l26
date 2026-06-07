@@ -1,0 +1,19 @@
+{
+    // Sort numbers into a set: a set is always kept sorted-ascending and
+    // deduplicated, so adding numbers in arbitrary order and printing the
+    // set yields them sorted with duplicates removed.
+    // Reads how many numbers to read, then that many numbers.
+    set sorted;
+    int count;
+    int i;
+    int v;
+    sorted = {};
+    read count;
+    i = 0;
+    while (i < count) {
+        read v;
+        add sorted v;
+        i = i + 1;
+    }
+    write sorted;
+}
