@@ -28,6 +28,7 @@ const char *op_mnemonic(VmOp op) {
         case OP_SEQ:    return "SEQ";
         case OP_SWRITE: return "SWRITE";
         case OP_SREAD:  return "SREAD";
+        case OP_LODX:   return "LODX";
         default:        return "???";
     }
 }

@@ -292,7 +292,7 @@ CAL/LOD/STO 格式）。`a` 为地址 / 立即数 / 偏移 / OPR 子功能号。
 OPR 子功能号在 `vm.h` 中以 `OprFunc` 枚举命名（`OPR_RET=0` … `OPR_READ=16`），
 取值与上表一致；`instr.c` 反汇编时附上助记注释（如 `OPR 0 14 ; write`）。
 
-### 8.2 新增集合指令（决策 #7：新增 11 个操作码，绝不复用整数操作码）
+### 8.2 新增集合指令（决策 #7：新增 12 个操作码，绝不复用整数操作码）
 
 集合指令直接读写活动记录中的 201 单元区；以集合区**基偏移**寻址（在操作数
 `a` 中，或经操作数栈传递）。下表栈效应与 `vm.c` 实现逐条核对：
@@ -310,6 +310,7 @@ OPR 子功能号在 `vm.h` 中以 `OprFunc` 枚举命名（`OPR_RET=0` … `OPR_
 | SEQ    | `SEQ 0 A`    | 弹出左、右两个集合基偏移；相等压 1 否则压 0。净 t−1（弹 2 压 1）。操作数 A 未用。 |
 | SWRITE | `SWRITE 0 A` | 将 A 处集合按 `{e1,e2,...}`（升序去重、无空格，空集为 `{}`）输出。无栈效应。 |
 | SREAD  | `SREAD 0 A`  | 读入一行（空格 / 逗号分隔整数）置入 A 处集合（先清空、去重升序）。无栈效应。 |
+| LODX   | `LODX 0 0`   | 间接取数：弹出一个**帧偏移**，压入该偏移处单元的值。净栈效应 0（弹偏移压值）。供推导式按运行时下标遍历集合区。 |
 
 > 设计取舍：`SUNION` / `SINTER` / `SCOPY` / `SEQ` 用操作数栈传递**集合基偏移**
 > 而非把 201 个值搬上栈，既复用 int 栈又避免巨量压栈；结果集合直接落到目标
@@ -320,12 +321,28 @@ OPR 子功能号在 `vm.h` 中以 `OprFunc` 枚举命名（`OPR_RET=0` … `OPR_
 - **集合相等判定**（产生式 60/61）：`LIT base_l; LIT base_r; SEQ`；`!=` 再对
   bool 结果做逻辑取反。
 - **集合推导式**（产生式 62/63）`{ gen | x in src if filt }`：降级为对源集合
-  `src` 元素的循环——为推导变量 `x` 分配一个临时 int 单元（**仅推导式内部可
-  见**），先 `SCLR dest`，按槽位 `k = 1..L26_MAX_SET` 遍历 `src`：当 `k <=
-  count` 时把元素载入 `x`，求值 `filt`（无过滤则恒真）→ 若真则求值 `gen` 并
-  `SADD dest`，否则跳过；循环由 LOD / 比较 / JPC / JMP 配合 `src` 的 count 单
-  元实现。结果先写入临时集再 `SCOPY` 到 `dest`，避免在遍历 `src` 时 `dest`
-  与 `src` 别名导致读写冲突。
+  `src` 元素的**运行时循环**——为推导变量 `x` 和隐藏循环下标 `i` 各分配一个
+  临时 int 单元（**仅推导式内部可见**）：
+
+  ```
+        SCLR tmp                ; tmp := {}
+        LIT 1 ; STO i           ; i := 1
+  loop: LOD i ; LOD src
+        OPR le ; JPC end        ; while (i <= count)
+        LIT src ; LOD i
+        OPR add ; LODX          ; 压入 cell[src+i]（间接取数）
+        STO x                   ; x := 当前元素
+        [filt] ; JPC next       ; 过滤（无过滤则省略）
+        [gen]  ; SADD tmp       ; tmp += gen(x)
+  next: LOD i ; LIT 1 ; OPR add ; STO i
+        JMP loop
+  end:  LIT tmp ; SCOPY dest
+  ```
+
+  整个推导式仅生成 ~20 条固定指令（外加 gen/filt 自身的代码），与集合容量
+  L26_MAX_SET 无关；`LODX` 提供 LOD 所缺的运行时下标寻址能力。结果先写入临
+  时集 `tmp` 再 `SCOPY` 到 `dest`，避免在遍历 `src` 时 `dest` 与 `src` 别名
+  导致读写冲突。
 
 ### 8.4 反汇编样例（`./l26c -S tests/example1.l26` 前段）
 
@@ -380,7 +397,7 @@ OPR 子功能号在 `vm.h` 中以 `OprFunc` 枚举命名（`OPR_RET=0` … `OPR_
 | src/parser.c | 语法分析 | 运行时构 LALR(1) 表 + 表驱动分析 + 语义动作建 AST |
 | src/semantic.c | 语义分析 | 声明 / 类型检查、名字解析、帧布局、类型标注 |
 | src/codegen.c | 代码生成 | AST → P-Code，含集合降级与短路求值 |
-| src/vm.c | 虚拟机 | 解释执行全部基础指令 + 11 个集合指令；含单步 `vm_step` |
+| src/vm.c | 虚拟机 | 解释执行全部基础指令 + 11 个集合指令与 LODX 间接取数；含单步 `vm_step` |
 | src/main.c | CLI 外壳 | 解析参数、串接流水线、渲染诊断、设置退出码 |
 
 短路求值：`&&` / `||` 由 `codegen.c` 用 JPC/JMP 实现，右操作数在结果已定时

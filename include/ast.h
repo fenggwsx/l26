@@ -100,9 +100,11 @@ struct Node {
          * temporary symbol slot (compvar_sym). filter may be NULL.
          * temp_sym is a hidden scratch SET slot (also assigned by semantic.c)
          * used by codegen so the result can be built without aliasing src when
-         * the comprehension is self-assigned (s = { e | x in s ... }). */
+         * the comprehension is self-assigned (s = { e | x in s ... }).
+         * idx_sym is a hidden scalar slot holding the runtime loop index used
+         * to walk the source set region via LODX. */
         struct { char var[L26_MAX_IDENT]; char src[L26_MAX_IDENT];
-                 int src_sym; int compvar_sym; int temp_sym;
+                 int src_sym; int compvar_sym; int temp_sym; int idx_sym;
                  Node *gen; Node *filter; } comp;
     } as;
 };

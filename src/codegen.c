@@ -235,57 +235,74 @@ static void gen_set_into(Ctx *c, int dest, const Node *n) {
              * Source layout: cell[src]=count, cell[src+1..src+count]=values
              * (sorted, deduped).  We materialise the result into `dest`.
              *
-             * The VM's LOD takes a STATIC offset only (no indexed load), so we
-             * lower the comprehension as a loop UNROLLED over the fixed slot
-             * positions 1..L26_MAX_SET, each iteration guarded at runtime by
-             * `count >= k`.  For an in-range slot k:
-             *     x       = cell[src+k]            (LOD srcoff+k ; STO xoff)
-             *     if (filter) { gen -> SADD dest }
-             * Out-of-range slots jump straight to `end`.  This reads src
-             * without mutating it.  The result is built into a private scratch
-             * set (comp.temp_sym) and copied into `dest` only at the end, so a
-             * self-assigning comprehension (s = { e | x in s ... }) does not
-             * clear or mutate src while the loop is still reading it.
+             * Lowered as a RUNTIME loop over the source elements using the
+             * LODX indexed load (pop offset, push cell value), with a hidden
+             * loop-index cell (comp.idx_sym):
+             *
+             *         SCLR tmp                  tmp := {}
+             *         LIT 1 ; STO idx           i := 1
+             *   loop: LOD idx ; LOD src
+             *         OPR le ; JPC end          while (i <= count)
+             *         LIT src ; LOD idx
+             *         OPR add ; LODX            push cell[src+i]
+             *         STO x                     x := element
+             *         [filter] ; JPC next      (optional)
+             *         [gen] ; SADD tmp          tmp += gen(x)
+             *   next: LOD idx ; LIT 1
+             *         OPR add ; STO idx         i := i + 1
+             *         JMP loop
+             *   end:  LIT tmp ; SCOPY dest
+             *
+             * The result is built into a private scratch set (comp.temp_sym)
+             * and copied into `dest` only at the end, so a self-assigning
+             * comprehension (s = { e | x in s ... }) does not clear or mutate
+             * src while the loop is still reading it.
              *
              * x (compvar_sym) is the comprehension variable's private scalar
              * cell, visible only inside gen/filter (semantic.c scoped it). */
             int xoff   = sym_offset(c, n->as.comp.compvar_sym);
             int srcoff = sym_offset(c, n->as.comp.src_sym);
             int tmpoff = sym_offset(c, n->as.comp.temp_sym);
+            int idxoff = sym_offset(c, n->as.comp.idx_sym);
 
             emit(c, OP_SCLR, 0, tmpoff);           /* tmp := {}             */
+            emit(c, OP_LIT, 0, 1);
+            emit(c, OP_STO, 0, idxoff);            /* i := 1                */
 
-            int end_jumps[L26_MAX_SET];
-            int nend = 0;
-            for (int k = 1; k <= L26_MAX_SET; ++k) {
-                /* if !(count >= k) goto end */
-                emit(c, OP_LOD, 0, srcoff);        /* push count            */
-                emit(c, OP_LIT, 0, k);             /* push k                */
-                emit(c, OP_OPR, 0, OPR_GE);        /* count >= k ? 1 : 0    */
-                int j = emit(c, OP_JPC, 0, 0);     /* false -> exit loop    */
-                if (nend < L26_MAX_SET) end_jumps[nend++] = j;
+            int loop = here(c);
+            emit(c, OP_LOD, 0, idxoff);            /* push i                */
+            emit(c, OP_LOD, 0, srcoff);            /* push count            */
+            emit(c, OP_OPR, 0, OPR_LE);            /* i <= count ? 1 : 0    */
+            int jend = emit(c, OP_JPC, 0, 0);      /* false -> end          */
 
-                /* x = cell[src+k] */
-                emit(c, OP_LOD, 0, srcoff + k);
-                emit(c, OP_STO, 0, xoff);
+            /* x = cell[src + i] (indexed load) */
+            emit(c, OP_LIT, 0, srcoff);
+            emit(c, OP_LOD, 0, idxoff);
+            emit(c, OP_OPR, 0, OPR_ADD);           /* src + i               */
+            emit(c, OP_LODX, 0, 0);                /* push cell[src+i]      */
+            emit(c, OP_STO, 0, xoff);
 
-                /* optional filter; NULL means always true */
-                int skip = -1;
-                if (n->as.comp.filter) {
-                    gen_expr(c, n->as.comp.filter);
-                    skip = emit(c, OP_JPC, 0, 0);  /* false -> skip element */
-                }
-
-                gen_expr(c, n->as.comp.gen);       /* value of gen expr     */
-                emit(c, OP_SADD, 0, tmpoff);
-
-                if (skip >= 0) patch(c, skip, here(c));
+            /* optional filter; NULL means always true */
+            int skip = -1;
+            if (n->as.comp.filter) {
+                gen_expr(c, n->as.comp.filter);
+                skip = emit(c, OP_JPC, 0, 0);      /* false -> skip element */
             }
+
+            gen_expr(c, n->as.comp.gen);           /* value of gen expr     */
+            emit(c, OP_SADD, 0, tmpoff);
+
+            if (skip >= 0) patch(c, skip, here(c));
+
+            /* i := i + 1 ; goto loop */
+            emit(c, OP_LOD, 0, idxoff);
+            emit(c, OP_LIT, 0, 1);
+            emit(c, OP_OPR, 0, OPR_ADD);
+            emit(c, OP_STO, 0, idxoff);
+            emit(c, OP_JMP, 0, loop);
+
             /* end: copy the scratch result into dest (safe even if dest==src). */
-            {
-                int endpc = here(c);
-                for (int i = 0; i < nend; ++i) patch(c, end_jumps[i], endpc);
-            }
+            patch(c, jend, here(c));
             emit(c, OP_LIT, 0, tmpoff);
             emit(c, OP_SCOPY, 0, dest);
             break;

@@ -231,6 +231,12 @@ static ValueType check_comp(Node *n, SymTab *st, DiagList *dl) {
     n->as.comp.temp_sym =
         symtab_declare(st, "comp tmp", TYPE_SET, n->pos, dl);
 
+    /* Hidden scalar loop-index slot: codegen walks the source set region with
+     * a runtime loop (LODX indexed load) instead of unrolled code. The
+     * synthetic name contains a space so it cannot collide with user names. */
+    n->as.comp.idx_sym =
+        symtab_declare(st, "comp idx", TYPE_INT, n->pos, dl);
+
     int body_ok = 1;
     ValueType gt = check_expr(n->as.comp.gen, st, dl);
     if (gt == TYPE_ERROR) {

@@ -561,6 +561,16 @@ int vm_step(VmState *vm, const Program *p, const VmIO *io, DiagList *dl) {
             vm->stack[vm->b + ins.a] = vm->stack[vm->t--];
             return 0;
 
+        case OP_LODX: {
+            /* pop a frame offset, push the cell value at that offset */
+            if (need(vm, dl, 1) < 0) return -1;
+            int off = vm->stack[vm->t];
+            if (off < 0 || vm->b + off >= L26_VM_STACK)
+                return vm_fail(vm, dl, "LODX offset out of range: %d", off);
+            vm->stack[vm->t] = vm->stack[vm->b + off];
+            return 0;
+        }
+
         case OP_JMP:
             if (ins.a < 0 || ins.a > p->count)
                 return vm_fail(vm, dl, "JMP target out of range: %d", ins.a);

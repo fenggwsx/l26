@@ -63,8 +63,13 @@ typedef enum {
                   *   push 1 if the sets are equal else 0. t -= 1
                   *   (two offsets popped, one bool pushed). BONUS.      */
     OP_SWRITE,   /* SWRITE 0 A : print set@A as {e1,e2,...}. No stack fx.*/
-    OP_SREAD     /* SREAD 0 A : read a line of space/comma separated ints
+    OP_SREAD,    /* SREAD 0 A : read a line of space/comma separated ints
                   *   into set@A (cleared first). No stack effect.       */
+    OP_LODX      /* LODX 0 0 : pop a frame offset, push the value of the
+                  *   frame cell at that offset (indexed load). t
+                  *   unchanged (pop offset, push value). Used by set
+                  *   comprehension to walk a set region in a runtime
+                  *   loop instead of unrolled code.                     */
 } VmOp;
 
 /* OPR sub-function codes (the A operand of an OPR instruction). Values
