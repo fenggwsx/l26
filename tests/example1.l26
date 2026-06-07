@@ -1,0 +1,15 @@
+{
+    int val;
+    set s;
+    s={1,2,3};
+    read val;
+    if (val in s) {
+        add s 10;
+        write val;
+    }
+    while (val>0) {
+        val = val -1;
+        write val;
+    }
+    write 999;
+}

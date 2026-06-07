@@ -1,0 +1,19 @@
+# Build artifacts
+/build/
+/l26c
+*.o
+*.obj
+*.a
+
+# Emscripten / wasm output
+/l26c.js
+/l26c.wasm
+*.wasm
+*.mem
+
+# Editor / OS noise
+*.swp
+*~
+.DS_Store
+compile_commands.json
+.cache/

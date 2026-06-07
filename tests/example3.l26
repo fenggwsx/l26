@@ -1,0 +1,28 @@
+{
+    // Third program: set comprehension (bonus) + set equality (bonus) + logic.
+    // Build evens-plus-one from a base set, test membership, and compare sets.
+    set base;
+    set derived;
+    set expect;
+    int n;
+    bool same;
+
+    base = {1, 2, 3, 4, 5, 6};
+
+    // comprehension: take x>2, emit x+1  ->  {4,5,6,7}
+    derived = { x + 1 | x in base if x > 2 };
+
+    expect = {4, 5, 6, 7};
+    same = derived == expect;       // set equality -> bool
+    write same;                     // expect 1 (true)
+
+    read n;
+    if (n in derived && !isempty(derived)) {
+        write n;
+        add derived 100;
+    } else {
+        write 0;
+    }
+
+    write derived;                  // print the resulting set
+}
