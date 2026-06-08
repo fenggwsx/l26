@@ -86,6 +86,7 @@ html, body {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--panel-2);
+  flex-shrink: 0;   /* fixed row: never squeezed by growing siblings */
 }
 .panel-head.sub { background: transparent; border-bottom: 1px solid var(--border); }
 .panel-head h2 { margin: 0; font-size: 15px; }
@@ -102,8 +103,11 @@ select {
 }
 
 textarea#source {
-  flex: 1 1 auto;
-  min-height: 200px;
+  /* basis 0: the editor gets a FIXED 3/5 share of the panel regardless of
+   * what the console/diagnostics contain — content must never reflow the
+   * outer layout. */
+  flex: 3 1 0;
+  min-height: 0;
   resize: none;
   border: none;
   outline: none;
@@ -126,6 +130,7 @@ textarea#source {
   border-bottom: 1px solid var(--border);
   background: var(--panel-2);
   flex-wrap: wrap;
+  flex-shrink: 0;   /* fixed row: never squeezed by growing siblings */
 }
 .btn {
   background: var(--panel);
@@ -147,7 +152,9 @@ textarea#source {
 /* ---- diagnostics ---- */
 .diagnostics {
   padding: 10px 14px;
-  max-height: 140px;
+  /* fixed 1/5 share; scroll internally */
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
   font-family: var(--mono);
   font-size: 12.5px;
@@ -169,7 +176,10 @@ textarea#source {
 
 /* ---- output console ---- */
 .console {
-  flex: 1 1 auto;
+  /* fixed 2/5 share; long program output scrolls inside, never grows the
+   * panel or pushes the toolbar above it. */
+  flex: 2 1 0;
+  min-height: 0;
   margin: 0;
   padding: 10px 14px;
   background: #0c0f1a;
@@ -179,7 +189,6 @@ textarea#source {
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  min-height: 90px;
 }
 
 /* ---- right side internal grid ---- */
