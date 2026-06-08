@@ -25,7 +25,11 @@
         <select id="example-select" title="Load an example program"></select>
       </div>
     </div>
-    <textarea id="source" spellcheck="false" autocomplete="off"></textarea>
+    <div class="editor-stack">
+      <pre id="hl-layer" class="hl-layer" aria-hidden="true"></pre>
+      <textarea id="source" spellcheck="false" autocomplete="off"
+                autocorrect="off" autocapitalize="off"></textarea>
+    </div>
     <div class="toolbar">
       <button id="btn-compile" class="btn primary">Compile</button>
       <button id="btn-reset"   class="btn"          disabled>Reset</button>
@@ -55,6 +59,7 @@
         <div class="panel-head sub">
           <h3>P-Code</h3>
           <span class="muted" id="frame-info"></span>
+          <button id="btn-clear-bp" class="btn tiny" title="Clear all breakpoints" disabled>clear bp</button>
         </div>
         <div class="pcode-scroll">
           <table id="pcode" class="pcode">

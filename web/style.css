@@ -120,6 +120,79 @@ textarea#source {
   tab-size: 4;
 }
 
+/* ---- syntax-highlighted editor (transparent textarea over a colored layer) ---- */
+.editor-stack {
+  position: relative;
+  flex: 3 1 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #0c0f1a;
+}
+/* The textarea and the highlight layer MUST share EVERY box/text metric so the
+ * caret tracks the colored glyphs pixel-for-pixel. */
+.editor-stack textarea#source,
+.editor-stack .hl-layer {
+  position: absolute;
+  inset: 0;
+  flex: none;            /* inside the stack they fill it, not flex-share it */
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  letter-spacing: normal;
+  box-sizing: border-box;
+  overflow: auto;
+  /* Reserve the vertical-scrollbar gutter on BOTH elements unconditionally.
+   * Without this the textarea (overflow:auto) loses ~15px of content width to
+   * its scrollbar once the program is tall enough to scroll, while the layer
+   * (overflow:hidden) keeps full width — the two then wrap long lines at
+   * different columns and the colored glyphs drift away from the caret on every
+   * line at/after the first wrapped one. A stable gutter keeps content width
+   * identical whether or not a scrollbar is present. */
+  scrollbar-gutter: stable;
+}
+.editor-stack textarea#source {
+  background: transparent;
+  color: transparent;            /* glyphs come from the layer below */
+  caret-color: var(--text);      /* but the caret stays visible */
+  resize: none;
+  outline: none;
+  z-index: 2;
+}
+.editor-stack textarea#source::selection { background: rgba(91, 140, 255, 0.35); }
+.editor-stack .hl-layer {
+  z-index: 1;
+  color: var(--text);
+  pointer-events: none;
+  background: #0c0f1a;
+  overflow: hidden;              /* scrolled in sync via JS; no own scrollbar */
+}
+/* token colors */
+.tok-kw      { color: var(--accent); font-weight: 600; }
+.tok-setop   { color: var(--set); font-weight: 600; }
+.tok-num     { color: var(--warn); }
+.tok-comment { color: var(--muted); font-style: italic; }
+.tok-bool    { color: var(--ok); font-weight: 600; }
+.tok-op      { color: var(--text); }
+.tok-punct   { color: var(--muted); }
+.tok-id      { color: var(--text); }
+/* inline error markers: red wavy underline on the offending source line */
+.hl-line.err-line {
+  text-decoration: underline wavy var(--err);
+  text-decoration-skip-ink: none;
+  background: rgba(255, 107, 107, 0.10);
+  box-shadow: inset 2px 0 0 var(--err);
+}
+
 /* ---- toolbar / buttons ---- */
 .toolbar {
   display: flex;
@@ -234,6 +307,29 @@ table.pcode tr.current td {
 table.pcode tr.current td.idx { color: var(--pc); font-weight: 700; }
 table.pcode tr.current td.op { color: var(--pc); }
 table.pcode tr.current td:first-child { box-shadow: inset 3px 0 0 var(--pc); }
+
+/* ---- breakpoints on P-Code rows ---- */
+table.pcode tbody tr { cursor: pointer; }
+table.pcode td.idx { position: relative; }
+table.pcode tr.breakpoint td:first-child { box-shadow: inset 3px 0 0 var(--err); }
+table.pcode tr.breakpoint td.idx::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--err);
+}
+/* breakpoint that is also the current pc: keep both cues distinct */
+table.pcode tr.breakpoint.current td:first-child {
+  box-shadow: inset 3px 0 0 var(--err), inset 6px 0 0 var(--pc);
+}
+/* clear-bp button in the P-Code head sits just left of nothing; keep it tidy */
+#btn-clear-bp { margin-left: 8px; }
+#frame-info { margin-left: auto; }
 
 /* ---- memory ---- */
 .mem-wrap { padding: 0; }

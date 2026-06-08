@@ -250,6 +250,7 @@ static char       *g_src = NULL;        /* owned copy of last source */
  * same function. This avoids JS-side free() bookkeeping. */
 static Buf g_compile_json;
 static Buf g_step_json;
+static Buf g_check_json;
 
 static void reset_session(void) {
     if (g_root) { ast_free(g_root); g_root = NULL; }
@@ -324,6 +325,49 @@ static void emit_symbols(Buf *b, const SymTab *st) {
 /* ================================================================== */
 /* Public API                                                          */
 /* ================================================================== */
+
+/* Diagnostics-only check. Runs lexer -> parser -> semantic on `source` using
+ * entirely LOCAL state and returns a JSON object { ok, diagnostics:[...] }.
+ *
+ * Unlike l26_compile, this NEVER touches the persistent session (g_prog, g_vm,
+ * g_root, retained source, output buffer). It is meant for the editor's live
+ * "diagnostics while typing" path: the user can keep stepping/running a
+ * previously-compiled program while editing, and only a manual l26_compile
+ * rebuilds the P-Code and re-inits the VM.
+ *
+ * The returned pointer is valid until the NEXT call to l26_check.
+ */
+EMSCRIPTEN_KEEPALIVE
+const char *l26_check(const char *source) {
+    TokenStream ts;
+    Node       *root = NULL;
+    SymTab      st;
+    DiagList    dl;
+
+    diag_init(&dl);
+    lexer_scan(source ? source : "", &ts, &dl);
+    root = parse(&ts, &dl);
+
+    symtab_init(&st);
+    if (root && !diag_has_errors(&dl)) {
+        semantic_check(root, &st, &dl);
+    }
+
+    Buf *b = &g_check_json;
+    if (!b->data) buf_init(b);
+    b->len = 0;
+    if (b->data) b->data[0] = '\0';
+
+    buf_putc(b, '{');
+    buf_key(b, "ok"); buf_puts(b, diag_has_errors(&dl) ? "false" : "true"); buf_putc(b, ',');
+    emit_diagnostics(b, &dl);
+    buf_putc(b, '}');
+
+    /* release the local AST; nothing here is retained */
+    if (root) ast_free(root);
+
+    return b->data ? b->data : "{\"ok\":false,\"diagnostics\":[]}";
+}
 
 /* Compile a source string. Runs lexer -> parser -> semantic -> codegen and
  * returns a JSON object (see the contract below). On success the program and

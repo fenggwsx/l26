@@ -158,12 +158,14 @@ const $ = (id) => document.getElementById(id);
 const els = {
   status: $("wasm-status"),
   source: $("source"),
+  hlLayer: $("hl-layer"),
   exampleSelect: $("example-select"),
   btnCompile: $("btn-compile"),
   btnReset: $("btn-reset"),
   btnStep: $("btn-step"),
   btnRun: $("btn-run"),
   btnClearOutput: $("btn-clear-output"),
+  btnClearBp: $("btn-clear-bp"),
   runState: $("run-state"),
   diagnostics: $("diagnostics"),
   output: $("output"),
@@ -191,6 +193,11 @@ let compiled = false;      // a program is available to step
 let waitingForInput = false;
 let pendingResume = null;  // function to call after feeding input
 
+const breakpoints = new Set(); // P-Code instruction indices with breakpoints
+let errorLines = new Set();    // 1-based source lines flagged by diagnostics
+let liveTimer = null;          // debounce handle for live diagnostics
+let liveSeq = 0;               // monotonically rising; guards stale debounced runs
+
 /* ------------------------------------------------------------------ */
 /* Wasm bootstrap                                                      */
 /* ------------------------------------------------------------------ */
@@ -202,6 +209,7 @@ function boot() {
   L26().then((m) => {
     api = {
       compile: m.cwrap("l26_compile", "string", ["string"]),
+      check: m.cwrap("l26_check", "string", ["string"]),
       step: m.cwrap("l26_step", "string", []),
       reset: m.cwrap("l26_reset", "string", []),
       run: m.cwrap("l26_run", "string", []),
@@ -225,26 +233,38 @@ function setStatus(cls, text) {
 /* ------------------------------------------------------------------ */
 /* Compile                                                             */
 /* ------------------------------------------------------------------ */
-function doCompile() {
-  if (!api) return;
+/* Shared by the manual Compile button and the debounced live compile so
+ * both paths behave identically. Recompiling rebuilds the P-Code layout,
+ * so breakpoints (keyed by instruction index) are CLEARED here — stale
+ * indices would point at the wrong instructions. Likewise, any in-progress
+ * run is invalidated: compile auto-inits the VM at pc=0 and we reflect that
+ * reset state, which is the predictable behavior when source changes. */
+function compileAndRefresh(src) {
+  if (!api) return null;
   hideInputModal();
   api.clearInput();
   waitingForInput = false;
   pendingResume = null;
 
-  const src = els.source.value;
   let res;
   try {
     res = JSON.parse(api.compile(src));
   } catch (e) {
     renderDiagnostics([{ severity: "error", phase: "codegen", line: 0, col: 0,
       message: "internal: bad JSON from compiler: " + e }]);
-    return;
+    return null;
   }
 
   lastCompile = res;
   renderDiagnostics(res.diagnostics, res.ok, res.frameSize);
+
+  // recompiled layout invalidates breakpoints
+  clearBreakpoints();
   renderPcode(res.pcode);
+
+  // inline error markers in the editor track every compile
+  errorLines = collectErrorLines(res.diagnostics);
+  renderHighlight();
 
   els.output.textContent = "";
   els.runState.textContent = "";
@@ -260,6 +280,180 @@ function doCompile() {
   } else {
     clearMemoryView();
   }
+  return res;
+}
+
+function doCompile() {
+  if (!api) return;
+  // a manual compile cancels any pending debounced live compile
+  if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+  liveSeq++;
+  compileAndRefresh(els.source.value);
+}
+
+/* Debounced LIVE DIAGNOSTICS: ~300ms after typing stops, run a diagnostics-only
+ * check (l26_check) that NEVER touches the VM/program session. This only
+ * refreshes the Diagnostics panel and the inline editor error markers — it does
+ * NOT rebuild the right-side P-Code and does NOT reset a running program. Only
+ * the manual Compile button (doCompile) rebuilds P-Code and re-inits the VM.
+ * Stale runs are ignored if the source changed again before the timer fired. */
+function scheduleLiveCheck() {
+  if (!api) return;
+  if (liveTimer) clearTimeout(liveTimer);
+  const mySeq = ++liveSeq;
+  liveTimer = setTimeout(() => {
+    liveTimer = null;
+    if (mySeq !== liveSeq) return;   // superseded by a newer edit
+    liveCheck(els.source.value);
+  }, 300);
+}
+
+function liveCheck(src) {
+  if (!api) return;
+  let res;
+  try {
+    res = JSON.parse(api.check(src));
+  } catch (e) {
+    renderDiagnostics([{ severity: "error", phase: "codegen", line: 0, col: 0,
+      message: "internal: bad JSON from checker: " + e }]);
+    return;
+  }
+  // diagnostics panel + inline markers only; right-side P-Code/VM untouched.
+  renderDiagnostics(res.diagnostics, res.ok, undefined);
+  errorLines = collectErrorLines(res.diagnostics);
+  renderHighlight();
+}
+
+function collectErrorLines(diags) {
+  const s = new Set();
+  if (diags) {
+    diags.forEach((d) => {
+      if (d.severity === "error" && d.line >= 1) s.add(d.line | 0);
+    });
+  }
+  return s;
+}
+
+/* ------------------------------------------------------------------ */
+/* Syntax highlighting (transparent textarea over a colored <pre>)     */
+/* ------------------------------------------------------------------ */
+const KEYWORDS = new Set([
+  "int", "bool", "set", "if", "else", "while",
+  "write", "read", "isempty",
+]);
+const SETOPS = new Set(["add", "remove", "union", "inter", "in"]);
+const BOOLS = new Set(["true", "false"]);
+
+function escHtml(s) {
+  return s.replace(/[&<>]/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;");
+}
+
+/* Single-pass scanner over a single line. Returns HTML of colored spans.
+ * Mirrors the L26 lexer token set; no catastrophic regex. */
+function tokenizeLineToHtml(line) {
+  let out = "";
+  let i = 0;
+  const n = line.length;
+  const isIdStart = (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c === "_";
+  const isIdPart = (c) => isIdStart(c) || (c >= "0" && c <= "9");
+  const isDigit = (c) => c >= "0" && c <= "9";
+
+  while (i < n) {
+    const c = line[i];
+
+    // line comment: // ... to end of line
+    if (c === "/" && line[i + 1] === "/") {
+      out += '<span class="tok-comment">' + escHtml(line.slice(i)) + "</span>";
+      break;
+    }
+
+    // whitespace (kept verbatim, no span needed)
+    if (c === " " || c === "\t") {
+      let j = i + 1;
+      while (j < n && (line[j] === " " || line[j] === "\t")) j++;
+      out += escHtml(line.slice(i, j));
+      i = j;
+      continue;
+    }
+
+    // numbers
+    if (isDigit(c)) {
+      let j = i + 1;
+      while (j < n && isDigit(line[j])) j++;
+      out += '<span class="tok-num">' + escHtml(line.slice(i, j)) + "</span>";
+      i = j;
+      continue;
+    }
+
+    // identifiers / keywords
+    if (isIdStart(c)) {
+      let j = i + 1;
+      while (j < n && isIdPart(line[j])) j++;
+      const word = line.slice(i, j);
+      let cls = "tok-id";
+      if (KEYWORDS.has(word)) cls = "tok-kw";
+      else if (SETOPS.has(word)) cls = "tok-setop";
+      else if (BOOLS.has(word)) cls = "tok-bool";
+      out += '<span class="' + cls + '">' + escHtml(word) + "</span>";
+      i = j;
+      continue;
+    }
+
+    // multi-char operators
+    const two = line.slice(i, i + 2);
+    if (two === "<=" || two === ">=" || two === "==" || two === "!=" ||
+        two === "&&" || two === "||") {
+      out += '<span class="tok-op">' + escHtml(two) + "</span>";
+      i += 2;
+      continue;
+    }
+
+    // single-char operators and the comprehension bar
+    if ("+-*/<>=!|".indexOf(c) !== -1) {
+      out += '<span class="tok-op">' + escHtml(c) + "</span>";
+      i += 1;
+      continue;
+    }
+
+    // punctuation
+    if ("{}();,".indexOf(c) !== -1) {
+      out += '<span class="tok-punct">' + escHtml(c) + "</span>";
+      i += 1;
+      continue;
+    }
+
+    // anything else: plain
+    out += escHtml(c);
+    i += 1;
+  }
+  return out;
+}
+
+/* Rebuild the colored layer from the current textarea text, wrapping each
+ * source line so we can flag error lines. Keeps scroll in sync. */
+function renderHighlight() {
+  if (!els.hlLayer) return;
+  const text = els.source.value;
+  const lines = text.split("\n");
+  let html = "";
+  for (let k = 0; k < lines.length; k++) {
+    const lineNo = k + 1;
+    const cls = errorLines.has(lineNo) ? "hl-line err-line" : "hl-line";
+    // trailing newline preserved so wrapping/heights match the textarea
+    const body = tokenizeLineToHtml(lines[k]);
+    html += '<span class="' + cls + '">' + body + "</span>" +
+            (k < lines.length - 1 ? "\n" : "");
+  }
+  // a trailing empty line in the textarea needs a final glyph slot
+  els.hlLayer.innerHTML = html + (text.endsWith("\n") ? "\n" : "");
+  syncHighlightScroll();
+}
+
+function syncHighlightScroll() {
+  if (!els.hlLayer) return;
+  els.hlLayer.scrollTop = els.source.scrollTop;
+  els.hlLayer.scrollLeft = els.source.scrollLeft;
 }
 
 /* ------------------------------------------------------------------ */
@@ -271,8 +465,14 @@ function renderDiagnostics(diags, ok, frameSize) {
   if (ok && !errorPresent(diags)) {
     const div = document.createElement("div");
     div.className = "diag-ok";
-    div.innerHTML = "✓ Compiled OK " +
-      '<span class="frame">(frame size: ' + (frameSize | 0) + " cells)</span>";
+    if (frameSize === undefined) {
+      // live diagnostics-only check (no codegen): don't claim a compile happened
+      div.innerHTML = "✓ No errors " +
+        '<span class="frame">(press Compile to build P-Code)</span>';
+    } else {
+      div.innerHTML = "✓ Compiled OK " +
+        '<span class="frame">(frame size: ' + (frameSize | 0) + " cells)</span>";
+    }
     els.diagnostics.appendChild(div);
   }
   if (hasItems) {
@@ -311,6 +511,7 @@ function renderPcode(pcode) {
   const frag = document.createDocumentFragment();
   pcode.forEach((ins) => {
     const tr = document.createElement("tr");
+    tr.title = "toggle breakpoint";
     tr.innerHTML =
       '<td class="idx">' + ins.idx + "</td>" +
       '<td class="op">' + ins.op + "</td>" +
@@ -318,10 +519,36 @@ function renderPcode(pcode) {
       "<td>" + ins.a + "</td>" +
       '<td class="text"></td>';
     tr.querySelector(".text").textContent = ins.text;
+    const idx = ins.idx;
+    tr.addEventListener("click", () => toggleBreakpoint(idx));
     frag.appendChild(tr);
     pcRowEls[ins.idx] = tr;
   });
   els.pcodeBody.appendChild(frag);
+}
+
+/* ------------------------------------------------------------------ */
+/* Breakpoints (on intermediate-code / P-Code rows)                    */
+/* ------------------------------------------------------------------ */
+function toggleBreakpoint(idx) {
+  if (breakpoints.has(idx)) breakpoints.delete(idx);
+  else breakpoints.add(idx);
+  const tr = pcRowEls[idx];
+  if (tr) tr.classList.toggle("breakpoint", breakpoints.has(idx));
+  updateClearBpBtn();
+}
+
+function clearBreakpoints() {
+  breakpoints.forEach((idx) => {
+    const tr = pcRowEls[idx];
+    if (tr) tr.classList.remove("breakpoint");
+  });
+  breakpoints.clear();
+  updateClearBpBtn();
+}
+
+function updateClearBpBtn() {
+  if (els.btnClearBp) els.btnClearBp.disabled = breakpoints.size === 0;
 }
 
 function highlightPc(pc) {
@@ -529,10 +756,57 @@ function doStep() {
 
 function doRun() {
   if (!api || !compiled) return;
-  const st = parseState(api.run());
-  refreshFromState(st);
-  if (st && st.waitingForInput) {
-    promptForInput(doRun);
+
+  // Fast path: no breakpoints -> let the C VM run to completion in one call.
+  if (breakpoints.size === 0) {
+    const st = parseState(api.run());
+    refreshFromState(st);
+    if (st && st.waitingForInput) promptForInput(doRun);
+    return;
+  }
+
+  // Breakpoint-aware path: drive api.step() in JS, stopping at the next
+  // instruction that carries a breakpoint. We execute at LEAST one step so a
+  // run resumes off a breakpoint we're currently parked on.
+  const CAP = 5000000;
+  let st = null;
+  let iters = 0;
+  for (;;) {
+    if (iters++ >= CAP) {
+      // surface a runtime-error-style message; reflect last known state
+      if (st) { st.output = null; refreshFromState(st); }
+      els.runState.textContent = "runtime error: step cap exceeded (" + CAP + ")";
+      els.runState.style.color = "var(--err)";
+      els.btnStep.disabled = true;
+      els.btnRun.disabled = true;
+      return;
+    }
+
+    st = parseState(api.step());
+    if (!st) return;
+
+    // accumulate output incrementally; do NOT full-refresh every step.
+    if (st.output) appendOutput(st.output);
+
+    if (st.error || st.halted) {
+      st.output = null;          // already appended above
+      refreshFromState(st);
+      return;
+    }
+    if (st.waitingForInput) {
+      st.output = null;
+      refreshFromState(st);      // shows "waiting for input…" + current view
+      promptForInput(doRun);     // resume THIS same breakpoint loop
+      return;
+    }
+    // stop if the NEXT instruction to execute carries a breakpoint
+    if (breakpoints.has(st.pc)) {
+      st.output = null;          // already appended above; avoid double-append
+      refreshFromState(st);
+      els.runState.textContent = "paused at breakpoint @" + st.pc;
+      els.runState.style.color = "var(--pc)";
+      return;
+    }
   }
 }
 
@@ -593,6 +867,17 @@ function wire() {
   els.btnRun.addEventListener("click", doRun);
   els.btnReset.addEventListener("click", doReset);
   els.btnClearOutput.addEventListener("click", () => { els.output.textContent = ""; });
+  els.btnClearBp.addEventListener("click", clearBreakpoints);
+
+  // editor: re-highlight on every keystroke (cheap), and schedule a debounced
+  // diagnostics-only check (does NOT rebuild P-Code or reset the VM, so a
+  // running program is not disturbed by typing). Keep the colored layer
+  // scroll-locked to the textarea.
+  els.source.addEventListener("input", () => {
+    renderHighlight();
+    scheduleLiveCheck();
+  });
+  els.source.addEventListener("scroll", syncHighlightScroll);
 
   els.exampleSelect.addEventListener("change", (e) => {
     const ex = EXAMPLES[e.target.value];
@@ -604,10 +889,14 @@ function wire() {
       els.btnStep.disabled = true;
       els.btnRun.disabled = true;
       els.diagnostics.innerHTML = '<span class="muted">Compile to see diagnostics.</span>';
+      clearBreakpoints();
       renderPcode(null);
       clearMemoryView();
       els.output.textContent = "";
       els.runState.textContent = "";
+      errorLines = new Set();
+      renderHighlight();           // re-color the freshly loaded example
+      scheduleLiveCheck();         // live diagnostics for the new source too
     }
   });
 
@@ -634,5 +923,6 @@ function wire() {
 /* ------------------------------------------------------------------ */
 els.btnCompile.disabled = true;
 populateExamples();
+renderHighlight();   // color the initially loaded example
 wire();
 boot();

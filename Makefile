@@ -61,7 +61,7 @@ WASM_SRCS := $(filter-out $(SRCDIR)/main.c,$(SRCS))
 WASM_OUT  := web/l26.js
 
 # Exported C functions (KEEPALIVE), each prefixed with '_' for the linker.
-WASM_EXPORTS := _l26_compile,_l26_step,_l26_reset,_l26_run,\
+WASM_EXPORTS := _l26_compile,_l26_check,_l26_step,_l26_reset,_l26_run,\
 _l26_feed_input,_l26_clear_input,_l26_frame_size,_malloc,_free
 
 WASM_FLAGS := -s MODULARIZE=1 -s EXPORT_ES6=0 -s EXPORT_NAME=L26 \
