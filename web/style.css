@@ -168,7 +168,11 @@ textarea#source {
   outline: none;
   z-index: 2;
 }
-.editor-stack textarea#source::selection { background: rgba(91, 140, 255, 0.35); }
+/* The selection must keep the textarea glyphs transparent. Browsers reset
+ * ::selection text color to a visible default, which would un-hide the
+ * normally-transparent textarea text and ghost it over the colored layer
+ * below (a selected token then appears twice). Force it transparent. */
+.editor-stack textarea#source::selection { background: rgba(91, 140, 255, 0.35); color: transparent; }
 .editor-stack .hl-layer {
   z-index: 1;
   color: var(--text);
