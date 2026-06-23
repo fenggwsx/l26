@@ -1,0 +1,148 @@
+name: Release
+
+# Triggered when a version tag (e.g. v1.0, v1.0.0, v0.0.1-rc1) is pushed:
+#   1. test      -- gate: run the full test suite on Linux; skip release on failure
+#   2. build-cli -- natively compile the CLI (l26c) on all three platforms
+#   3. build-web -- build wasm once on a single Linux runner, then Go-cross-compile
+#                   the web server (l26web) for all three platforms
+#   4. release   -- collect the 6 artifacts and create a GitHub Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # writing a Release requires write permission
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Gate: run tests/run_tests.sh (which itself runs make and all test cases).
+  # If any case fails -> downstream build/release jobs don't run -> no bad release.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test (gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run test suite
+        run: bash tests/run_tests.sh
+
+  # ---------------------------------------------------------------------------
+  # CLI: compile natively on each of the three platforms (C cross-compilation is
+  # painful; native builds are the most reliable).
+  # ---------------------------------------------------------------------------
+  build-cli:
+    name: Build CLI (${{ matrix.name }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            os: ubuntu-latest
+          - name: darwin-arm64
+            os: macos-latest
+          - name: windows-amd64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Linux / macOS: ship GNU make + cc/clang out of the box; build directly.
+      - name: Build (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          make
+          mv l26c l26c-${{ matrix.name }}
+
+      # Windows: use the MSYS2 + MinGW toolchain, fully compatible with the
+      # existing GNU Makefile. Static-link to avoid MinGW runtime DLL deps;
+      # MinGW gcc produces the .exe automatically.
+      - name: Setup MSYS2 (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make
+            mingw-w64-x86_64-gcc
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: msys2 {0}
+        run: |
+          make CC=gcc LDFLAGS=-static
+          mv l26c.exe l26c-windows-amd64.exe
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: l26c-${{ matrix.name }}
+          path: l26c-${{ matrix.name }}*
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Web: wasm is platform-independent and built only once; Go has no CGO, so
+  # cross-compiling all three platforms is near zero cost. Both steps live in the
+  # same Linux job, avoiding even a cross-job wasm hand-off.
+  # ---------------------------------------------------------------------------
+  build-web:
+    name: Build Web (wasm + Go cross-compile)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+
+      - name: Build wasm (emcc)
+        run: |
+          make wasm
+          test -f web/l26.js && test -f web/l26.wasm   # verify outputs exist
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      # Cross-compile inside web/: the wasm is in place so //go:embed works.
+      # Can't use `make webserver` (it hardcodes `go build -o ../l26web .` with no
+      # cross vars).
+      - name: Cross-compile l26web (3 platforms)
+        run: |
+          mkdir -p dist
+          cd web
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -o ../dist/l26web-linux-amd64       .
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -o ../dist/l26web-darwin-arm64      .
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o ../dist/l26web-windows-amd64.exe .
+
+      - name: Upload Web artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: l26web-all
+          path: dist/l26web-*
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Collect all artifacts and create a Release named after the triggering tag.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish Release
+    needs: [build-cli, build-web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true   # merge all artifacts into one directory
+
+      - name: List artifacts
+        run: ls -lR artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
