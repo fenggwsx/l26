@@ -1,6 +1,7 @@
 # Build artifacts
 /build/
 /l26c
+/l26web
 *.o
 *.obj
 *.a

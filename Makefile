@@ -24,7 +24,7 @@ OBJDIR  := build
 SRCS := $(wildcard $(SRCDIR)/*.c)
 OBJS := $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(SRCS))
 
-.PHONY: all clean wasm
+.PHONY: all clean wasm webserver
 
 all: $(BIN)
 
@@ -38,7 +38,7 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
 clean:
-	rm -rf $(OBJDIR) $(BIN) l26c.js l26c.wasm web/l26.js web/l26.wasm
+	rm -rf $(OBJDIR) $(BIN) l26c.js l26c.wasm web/l26.js web/l26.wasm l26web
 
 # --- wasm (Emscripten) build: guarded so plain `make` never needs emcc ---
 # Compiles every core .c PLUS the wasm shell (src/wasm_api.c) but EXCLUDES the
@@ -78,3 +78,20 @@ else
 	$(EMCC) $(CSTD) $(WARN) -O2 -Iinclude $(WASM_SRCS) -o $(WASM_OUT) $(WASM_FLAGS)
 	@echo "wasm: built web/l26.js + web/l26.wasm"
 endif
+
+# --- web server (Go) build: independent demo shell -------------------------
+# l26web is a standalone Go program that embeds the web/ static assets
+# (index.html, app.js, style.css plus the emscripten outputs l26.js + l26.wasm)
+# via //go:embed and serves them over net/http (one goroutine per connection).
+# The Go sources live inside web/ so //go:embed can reference the assets
+# without crossing a parent directory. `go build` ignores .go / go.mod files
+# when collecting embedded assets, so they are never served.
+#
+# Prerequisite: web/l26.js + web/l26.wasm must exist (run `make wasm` first).
+webserver:
+	@if [ ! -f web/l26.wasm ] || [ ! -f web/l26.js ]; then \
+		echo "webserver: web/l26.js or web/l26.wasm missing; run 'make wasm' first."; \
+		exit 1; \
+	fi
+	cd web && go build -o ../l26web .
+	@echo "webserver: built ./l26web (run it, then open the printed URL)"
